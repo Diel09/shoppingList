@@ -2,10 +2,13 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:grocery_list/pages/add_list.dart';
+import 'package:grocery_list/pages/auth/login_page.dart';
 import 'package:grocery_list/services/list_crud.dart';
 
 class HomePage extends StatefulWidget {
-  const HomePage({super.key, required User user});
+  const HomePage({Key? key, required this.user}) : super(key: key);
+
+  final User user;
 
   @override
   State<HomePage> createState() => _HomePageState();
@@ -13,22 +16,44 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   final FirestoreService firestoreService = FirestoreService();
+  final FirebaseAuth auth = FirebaseAuth.instance;
+  late final String _currentUser;
+
+  @override
+  void initState() {
+    super.initState();
+    _currentUser = widget.user.uid;
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text("Shopping List")),
+      appBar: AppBar(
+        title: const Text("Shopping Lists"),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.logout),
+            onPressed: () async {
+              await auth.signOut();
+              Navigator.pushReplacement(
+                context,
+                MaterialPageRoute(builder: (context) => LoginPage()),
+              );
+            },
+          ),
+        ],
+      ),
       floatingActionButton: FloatingActionButton(
         onPressed: () {
           Navigator.push(
             context,
-            MaterialPageRoute(builder: (context) => const AddListPage()),
+            MaterialPageRoute(builder: (context) => AddListPage(currentUser: _currentUser)),
           );
         },
         child: const Icon(Icons.add),
       ),
       body: StreamBuilder<QuerySnapshot>(
-        stream: getShoppingList(),
+        stream: firestoreService.getShoppingList(_currentUser),
         builder: (context, snapshot) {
           if (snapshot.hasData) {
             List<DocumentSnapshot> groceryList = snapshot.data!.docs;
@@ -38,14 +63,13 @@ class _HomePageState extends State<HomePage> {
               itemBuilder: (context, index) {
                 DocumentSnapshot document = groceryList[index];
                 String docId = document.id;
-                Map<String, dynamic> data =
-                    document.data() as Map<String, dynamic>;
+                Map<String, dynamic> data = document.data() as Map<String, dynamic>;
                 String name = data['name'];
-                double totalPrice = data['total_price'];
+                double totalPrice = data['expense'] ?? 0;
 
                 return ListTile(
                   title: Text(name),
-                  subtitle: Text('Total Price: Php $totalPrice'),
+                  subtitle: Text('Total Expense: Php $totalPrice'),
                   trailing: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
@@ -56,6 +80,7 @@ class _HomePageState extends State<HomePage> {
                             context,
                             MaterialPageRoute(
                               builder: (context) => AddListPage(
+                                currentUser: _currentUser,
                                 docId: docId,
                                 existingData: data,
                               ),
@@ -78,15 +103,17 @@ class _HomePageState extends State<HomePage> {
               },
             );
           } else {
-            return const Center(child: CircularProgressIndicator());
+            return const Text(
+              'You have no List',
+              style: TextStyle(fontSize: 24, color: Colors.black),
+              );
           }
         },
       ),
     );
   }
 
-  void _showItemsDialog(
-      BuildContext context, String name, List items, String docId) {
+  void _showItemsDialog(BuildContext context, String name, List items, String docId) {
     showDialog(
       context: context,
       builder: (context) {
@@ -148,8 +175,8 @@ class _HomePageState extends State<HomePage> {
             ),
             TextButton(
               onPressed: () {
-                deleteList(docId);
-                Navigator.pop(context); // Close the dialog
+                firestoreService.deleteList(docId);
+                Navigator.pop(context);
               },
               child: const Text('Delete'),
             ),
@@ -157,19 +184,6 @@ class _HomePageState extends State<HomePage> {
         );
       },
     );
-  }
-
-  Stream<QuerySnapshot> getShoppingList() {
-    final CollectionReference lists =
-        FirebaseFirestore.instance.collection('shopping_lists');
-    final listStream = lists.orderBy('timestamp', descending: true).snapshots();
-    return listStream;
-  }
-
-  void deleteList(String docId) async {
-    final CollectionReference lists =
-        FirebaseFirestore.instance.collection('shopping_lists');
-    await lists.doc(docId).delete();
   }
 
   void _updateTotalExpense(String docId, List items) async {
